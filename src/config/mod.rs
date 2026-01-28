@@ -529,6 +529,9 @@ impl Config {
     pub async fn get_tracked_config_files(&self) -> Result<ConfigMap> {
         let mut config_files: ConfigMap = ConfigMap::default();
         for path in Tracker::list_all()?.into_iter() {
+            if !config_file::is_trusted(&path) {
+                continue;
+            }
             match config_file::parse(&path).await {
                 Ok(cf) => {
                     config_files.insert(path, cf);

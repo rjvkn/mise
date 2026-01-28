@@ -12,6 +12,7 @@ use crate::file::display_path;
 use crate::http::{HTTP, HTTP_FETCH};
 use crate::install_context::InstallContext;
 use crate::lock_file::LockFile;
+use crate::toolset::tool_request::ToolRequestKind;
 use crate::toolset::{ToolRequest, ToolVersion};
 use crate::{file, github, plugins};
 use async_trait::async_trait;
@@ -298,8 +299,8 @@ impl ErlangPlugin {
         self.update_kerl().await?;
 
         file::remove_all(tv.install_path())?;
-        match &tv.request {
-            ToolRequest::Ref { .. } => {
+        match &tv.request.kind {
+            ToolRequestKind::Ref { .. } => {
                 unimplemented!("erlang does not yet support refs");
             }
             _ => {

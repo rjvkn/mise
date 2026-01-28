@@ -20,7 +20,8 @@ use crate::config::Config;
 use crate::http::{HTTP, HTTP_FETCH};
 use crate::install_context::InstallContext;
 use crate::lockfile::PlatformInfo;
-use crate::toolset::{ToolRequest, ToolVersion, Toolset};
+use crate::toolset::tool_request::ToolRequestKind;
+use crate::toolset::{ToolVersion, Toolset};
 use crate::ui::progress_report::SingleReport;
 use crate::{file, plugins};
 
@@ -154,7 +155,7 @@ impl Backend for DenoPlugin {
         _config: &Arc<Config>,
         tv: &ToolVersion,
     ) -> Result<Vec<PathBuf>> {
-        if let ToolRequest::System { .. } = tv.request {
+        if let ToolRequestKind::System = tv.request.kind {
             return Ok(vec![]);
         }
         let bin_paths = vec![

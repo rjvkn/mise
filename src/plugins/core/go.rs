@@ -12,7 +12,8 @@ use crate::file::{TarFormat, TarOptions};
 use crate::http::HTTP;
 use crate::install_context::InstallContext;
 use crate::lockfile::PlatformInfo;
-use crate::toolset::{ToolRequest, ToolVersion, Toolset};
+use crate::toolset::tool_request::ToolRequestKind;
+use crate::toolset::{ToolVersion, Toolset};
 use crate::ui::progress_report::SingleReport;
 use crate::{env, file, github, plugins};
 use async_trait::async_trait;
@@ -309,7 +310,7 @@ impl Backend for GoPlugin {
         _config: &Arc<Config>,
         tv: &ToolVersion,
     ) -> eyre::Result<Vec<PathBuf>> {
-        if let ToolRequest::System { .. } = tv.request {
+        if let ToolRequestKind::System = tv.request.kind {
             return Ok(vec![]);
         }
         // goroot/bin must always be included, irrespective of MISE_GO_SET_GOROOT

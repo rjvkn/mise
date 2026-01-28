@@ -86,7 +86,3 @@ pub fn nred<D>(val: D) -> StyledObject<D> {
 pub fn ndim<D>(val: D) -> StyledObject<D> {
     nstyle(val).dim()
 }
-
-pub fn nbright<D>(val: D) -> StyledObject<D> {
-    nstyle(val).bright()
-}

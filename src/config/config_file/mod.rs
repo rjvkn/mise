@@ -20,6 +20,7 @@ use crate::hooks::Hook;
 use crate::prepare::PrepareConfig;
 use crate::redactions::Redactions;
 use crate::task::{Task, TaskTemplate};
+use crate::toolset::tool_request::ToolRequestKind;
 use crate::toolset::{ToolRequest, ToolRequestSet, ToolSource, ToolVersionList, Toolset};
 use crate::ui::{prompt, style};
 use crate::watch_files::WatchFile;
@@ -177,21 +178,12 @@ impl dyn ConfigFile {
         for (ba, versions) in plugins_to_update {
             let mut new = vec![];
             for tr in versions {
-                let mut tr = tr.clone();
+                let mut tr = tr.clone(); // clone the ToolRequest to get ownership
                 if pin {
                     let tv = tr.resolve(config, &Default::default()).await?;
-                    if let ToolRequest::Version {
-                        version: _version,
-                        source,
-                        options,
-                        backend,
-                    } = tr
-                    {
-                        tr = ToolRequest::Version {
+                    if let ToolRequestKind::Version { .. } = &tr.kind {
+                        tr.kind = ToolRequestKind::Version {
                             version: tv.version,
-                            source,
-                            options,
-                            backend,
                         };
                     }
                 }
@@ -200,6 +192,7 @@ impl dyn ConfigFile {
             trace!("replacing versions {new:?}");
             self.replace_versions(&ba, new)?;
         }
+
         trace!("done adding runtimes");
 
         Ok(())

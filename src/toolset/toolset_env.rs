@@ -12,7 +12,7 @@ use crate::env_diff::EnvMap;
 use crate::path_env::PathEnv;
 use crate::toolset::Toolset;
 use crate::toolset::env_cache::{CachedEnv, compute_settings_hash, get_file_mtime};
-use crate::toolset::tool_request::ToolRequest;
+use crate::toolset::tool_request::ToolRequestKind;
 use crate::{env, parallel, uv};
 
 impl Toolset {
@@ -241,7 +241,7 @@ impl Toolset {
         let items: Vec<_> = self
             .list_current_installed_versions(config)
             .into_iter()
-            .filter(|(_, tv)| !matches!(tv.request, ToolRequest::System { .. }))
+            .filter(|(_, tv)| !matches!(tv.request.kind, ToolRequestKind::System))
             .map(|(b, tv)| (config.clone(), this.clone(), b, tv))
             .collect();
 

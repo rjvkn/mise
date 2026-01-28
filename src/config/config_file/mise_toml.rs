@@ -31,6 +31,7 @@ use crate::redactions::Redactions;
 use crate::registry::REGISTRY;
 use crate::task::{Task, TaskTemplate};
 use crate::tera::{BASE_CONTEXT, get_tera};
+use crate::toolset::tool_request::ToolRequestKind;
 use crate::toolset::{ToolRequest, ToolRequestSet, ToolSource, ToolVersionOptions};
 use crate::watch_files::WatchFile;
 use crate::{env, file};
@@ -934,87 +935,24 @@ impl Clone for MiseToml {
 
 impl From<ToolRequest> for MiseTomlTool {
     fn from(tr: ToolRequest) -> Self {
-        match tr {
-            ToolRequest::Version {
-                version,
-                options,
-                backend: _backend,
-                source: _source,
-            } => Self {
-                tt: ToolVersionType::Version(version),
-                options: if options.is_empty() {
-                    None
-                } else {
-                    Some(options)
-                },
-            },
-            ToolRequest::Path {
-                path,
-                options,
-                backend: _backend,
-                source: _source,
-            } => Self {
-                tt: ToolVersionType::Path(path),
-                options: if options.is_empty() {
-                    None
-                } else {
-                    Some(options)
-                },
-            },
-            ToolRequest::Prefix {
-                prefix,
-                options,
-                backend: _backend,
-                source: _source,
-            } => Self {
-                tt: ToolVersionType::Prefix(prefix),
-                options: if options.is_empty() {
-                    None
-                } else {
-                    Some(options)
-                },
-            },
-            ToolRequest::Ref {
-                ref_,
-                ref_type,
-                options,
-                backend: _backend,
-                source: _source,
-            } => Self {
-                tt: ToolVersionType::Ref(ref_, ref_type),
-                options: if options.is_empty() {
-                    None
-                } else {
-                    Some(options)
-                },
-            },
-            ToolRequest::Sub {
-                sub,
-                options,
-                orig_version,
-                backend: _backend,
-                source: _source,
-            } => Self {
-                tt: ToolVersionType::Sub { sub, orig_version },
-                options: if options.is_empty() {
-                    None
-                } else {
-                    Some(options)
-                },
-            },
-            ToolRequest::System {
-                options,
-                backend: _backend,
-                source: _source,
-            } => Self {
-                tt: ToolVersionType::System,
-                options: if options.is_empty() {
-                    None
-                } else {
-                    Some(options)
-                },
-            },
-        }
+        let options = if tr.options.is_empty() {
+            None
+        } else {
+            Some(tr.options)
+        };
+
+        let tt = match tr.kind {
+            ToolRequestKind::Version { version } => ToolVersionType::Version(version),
+            ToolRequestKind::Path { path } => ToolVersionType::Path(path),
+            ToolRequestKind::Prefix { prefix } => ToolVersionType::Prefix(prefix),
+            ToolRequestKind::Ref { ref_, ref_type } => ToolVersionType::Ref(ref_, ref_type),
+            ToolRequestKind::Sub { sub, orig_version } => {
+                ToolVersionType::Sub { sub, orig_version }
+            }
+            ToolRequestKind::System => ToolVersionType::System,
+        };
+
+        Self { tt, options }
     }
 }
 

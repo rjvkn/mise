@@ -4,31 +4,37 @@ expression: "replace_path(&format!(\"{:#?}\", cf.to_tool_request_set().unwrap().
 ---
 {
     BackendArg(terraform): [
-        Version {
+        ToolRequest {
             backend: BackendArg(terraform),
-            version: "1.0.0",
+            source: MiseToml(
+                "~/cwd/.test.mise.toml",
+            ),
             options: ToolVersionOptions {
                 os: None,
                 install_env: {},
                 opts: {},
             },
-            source: MiseToml(
-                "~/cwd/.test.mise.toml",
-            ),
+            kind: Version {
+                version: "1.0.0",
+            },
+            reason: Install,
         },
     ],
     BackendArg(jq): [
-        Prefix {
+        ToolRequest {
             backend: BackendArg(jq),
-            prefix: "1.6",
+            source: MiseToml(
+                "~/cwd/.test.mise.toml",
+            ),
             options: ToolVersionOptions {
                 os: None,
                 install_env: {},
                 opts: {},
             },
-            source: MiseToml(
-                "~/cwd/.test.mise.toml",
-            ),
+            kind: Prefix {
+                prefix: "1.6",
+            },
+            reason: Install,
         },
     ],
 }
