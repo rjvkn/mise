@@ -274,24 +274,16 @@ impl Toolset {
             .collect::<Vec<_>>();
         let outdated = parallel::parallel(versions, |(config, t, tv, bump, opts)| async move {
             let mut outdated = vec![];
-            match t.outdated_info(&config, &tv, bump, &opts).await {
-                Ok(Some(oi)) => outdated.push(oi),
-                Ok(None) => {}
+            let oi = match t.outdated_info(&config, &tv, bump, &opts).await {
+                Ok(oi) => oi,
                 Err(e) => {
                     warn!("Error getting outdated info for {tv}: {e:#}");
+                    None
                 }
-            }
-            if t.symlink_path(&tv).is_some() {
-                trace!("skipping symlinked version {tv}");
-                // do not consider symlinked versions to be outdated
-                return Ok(outdated);
-            }
-            match OutdatedInfo::resolve(&config, tv.clone(), bump, &opts).await {
-                Ok(Some(oi)) => outdated.push(oi),
-                Ok(None) => {}
-                Err(e) => {
-                    warn!("Error creating OutdatedInfo for {tv}: {e:#}");
-                }
+            };
+
+            if let Some(oi) = oi {
+                outdated.push(oi);
             }
             Ok(outdated)
         })
@@ -448,7 +440,11 @@ pub async fn get_versions_needed_by_tracked_configs(
     for cf in config.get_tracked_config_files().await?.values() {
         let mut ts = Toolset::from(cf.to_tool_request_set()?);
         ts.resolve_with_opts(config, &opts).await?;
-        for (_, tv) in ts.list_current_versions() {
+        for (_, tv) in ts
+            .list_current_versions()
+            .into_iter()
+            .filter(|(_, tv)| tv.version == tv.request.version())
+        {
             needed.insert((tv.ba().short.to_string(), tv.tv_pathname()));
         }
     }

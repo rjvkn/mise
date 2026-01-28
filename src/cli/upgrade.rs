@@ -161,6 +161,8 @@ impl Upgrade {
             })
             .collect::<Vec<_>>();
 
+        let mut reason = "upgrade";
+
         // Determine which old versions should be uninstalled after upgrade
         // Skip uninstall when current == latest (channel-based versions that update in-place)
         let to_remove: Vec<_> = outdated
@@ -170,6 +172,7 @@ impl Upgrade {
                     // Skip if current and latest version strings are identical
                     // This handles channels like "nightly", "stable", "beta" that update in-place
                     if &o.latest == current {
+                        reason = "update";
                         return None;
                     }
                     Some((o, current.clone()))
@@ -196,9 +199,7 @@ impl Upgrade {
         }
 
         let opts = InstallOptions {
-            reason: "upgrade".to_string(),
-            // TODO: can we remove this without breaking e2e/cli/test_upgrade? it may be causing tools to re-install
-            force: true,
+            reason: reason.to_string(),
             jobs: self.jobs,
             raw: self.raw,
             resolve_options: ResolveOptions {
@@ -255,7 +256,7 @@ impl Upgrade {
         for (o, tv) in to_remove {
             if successful_versions
                 .iter()
-                .any(|v| v.ba() == o.tool_version.ba())
+                .any(|v| v.ba() == o.tool_version.ba() && v.version == o.latest)
             {
                 // Check if this version is still needed by another tracked config
                 let version_key = (
@@ -306,7 +307,6 @@ impl Upgrade {
             .uninstall_version(config, tv, pr, self.dry_run)
             .await
             .wrap_err_with(|| format!("failed to uninstall {tv}"))?;
-        pr.finish();
         Ok(())
     }
 

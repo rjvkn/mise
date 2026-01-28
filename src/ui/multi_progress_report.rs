@@ -135,23 +135,21 @@ impl MultiProgressReport {
         }
 
         // Create header job showing overall progress (only in progress UI mode)
-        // Left-aligned, colored header with "mise VERSION by @jdx" and cur/total count
+        // Left-aligned, colored header with "mise VERSION" and cur/total count
         if self.use_progress_ui() && !dry_run {
             use crate::ui::style;
 
             // Build colored header text parts
             let mise_text = format!("{}", style::emagenta("mise").bold());
             let version_text = format!("{}", style::edim(&*VERSION_PLAIN));
-            let by_text = format!("{}", style::edim("by @jdx"));
 
-            // Template showing: "mise VERSION by @jdx                  [cur/total]"
-            let header_body = "{{ mise }} {{ version }} {{ by | flex_fill }} {{ progress }}";
+            // Template showing: "mise VERSION                  [cur/total]"
+            let header_body = "{{ mise }} {{ version | flex_fill }} {{ progress }}";
 
             let job = ProgressJobBuilder::new()
                 .body(header_body)
                 .prop("mise", &mise_text)
                 .prop("version", &version_text)
-                .prop("by", &by_text)
                 .prop("progress", &format!("[0/{}]", total_count))
                 .progress_total(total_count)
                 .progress_current(0)
