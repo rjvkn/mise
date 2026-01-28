@@ -3,6 +3,7 @@ use color_eyre::eyre::bail;
 use console::style;
 use self_update::backends::github::Update;
 use self_update::{Status, cargo_crate_version};
+use semver::Version;
 
 use crate::cli::version::{ARCH, OS};
 use crate::config::Settings;
@@ -135,9 +136,11 @@ impl SelfUpdate {
             .map(|v| format!("v{v}"))?;
 
         // Check if already up to date (unless --force is specified)
-        let current_version = format!("v{}", cargo_crate_version!());
-        if !self.force && v == current_version {
-            return Ok(Status::UpToDate(current_version));
+        let current = Version::parse(cargo_crate_version!())?;
+        let incoming = Version::parse(v.trim_start_matches('v'))?;
+
+        if !self.force && incoming <= current {
+            return Ok(Status::UpToDate(format!("v{}", current)));
         }
 
         let target = format!("{}-{}", *OS, *ARCH);

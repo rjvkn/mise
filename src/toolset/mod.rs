@@ -274,24 +274,16 @@ impl Toolset {
             .collect::<Vec<_>>();
         let outdated = parallel::parallel(versions, |(config, t, tv, bump, opts)| async move {
             let mut outdated = vec![];
-            match t.outdated_info(&config, &tv, bump, &opts).await {
-                Ok(Some(oi)) => outdated.push(oi),
-                Ok(None) => {}
+            let oi = match t.outdated_info(&config, &tv, bump, &opts).await {
+                Ok(oi) => oi,
                 Err(e) => {
                     warn!("Error getting outdated info for {tv}: {e:#}");
+                    None
                 }
-            }
-            if t.symlink_path(&tv).is_some() {
-                trace!("skipping symlinked version {tv}");
-                // do not consider symlinked versions to be outdated
-                return Ok(outdated);
-            }
-            match OutdatedInfo::resolve(&config, tv.clone(), bump, &opts).await {
-                Ok(Some(oi)) => outdated.push(oi),
-                Ok(None) => {}
-                Err(e) => {
-                    warn!("Error creating OutdatedInfo for {tv}: {e:#}");
-                }
+            };
+
+            if let Some(oi) = oi {
+                outdated.push(oi);
             }
             Ok(outdated)
         })
