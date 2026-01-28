@@ -5,6 +5,7 @@ use crate::config::settings::{Settings, SettingsStatusMissingTools};
 use crate::env::TERM_WIDTH;
 use crate::registry::REGISTRY;
 use crate::registry::tool_enabled;
+use crate::toolset::tool_request::{ToolRequestKind, ToolRequestReason};
 use crate::{backend, parallel};
 pub use builder::ToolsetBuilder;
 use console::truncate_str;
@@ -211,12 +212,15 @@ impl Toolset {
                     // map cargo backend specific prefixes to ref
                     let tv = match v.version.split_once(':') {
                         Some((ref_type @ ("tag" | "branch" | "rev"), r)) => {
-                            let request = ToolRequest::Ref {
+                            let request = ToolRequest {
                                 backend: p.ba().clone(),
-                                ref_: r.to_string(),
-                                ref_type: ref_type.to_string(),
-                                options: v.request.options().clone(),
                                 source: v.request.source().clone(),
+                                options: v.request.options().clone(),
+                                kind: ToolRequestKind::Ref {
+                                    ref_: r.to_string(),
+                                    ref_type: ref_type.to_string(),
+                                },
+                                reason: ToolRequestReason::ListCurrentVersions,
                             };
                             let version = format!("ref:{r}");
                             ToolVersion::new(request, version)
@@ -292,29 +296,17 @@ impl Toolset {
             .map(|(t, tv)| (config.clone(), t, tv, bump, opts.clone()))
             .collect::<Vec<_>>();
         let outdated = parallel::parallel(versions, |(config, t, tv, bump, opts)| async move {
-            let mut outdated = HashSet::new();
-            match t.outdated_info(&config, &tv, bump, &opts).await {
-                Ok(Some(oi)) => {
-                    outdated.insert(oi);
-                }
-                Ok(None) => {}
+            let mut outdated = vec![];
+            let oi = match t.outdated_info(&config, &tv, bump, &opts).await {
+                Ok(oi) => oi,
                 Err(e) => {
                     warn!("Error getting outdated info for {tv}: {e:#}");
+                    None
                 }
-            }
-            if t.symlink_path(&tv).is_some() {
-                trace!("skipping symlinked version {tv}");
-                // do not consider symlinked versions to be outdated
-                return Ok(outdated);
-            }
-            match OutdatedInfo::resolve(&config, tv.clone(), bump, &opts).await {
-                Ok(Some(oi)) => {
-                    outdated.insert(oi);
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    warn!("Error creating OutdatedInfo for {tv}: {e:#}");
-                }
+            };
+
+            if let Some(oi) = oi {
+                outdated.push(oi);
             }
             Ok(outdated)
         })
@@ -611,7 +603,11 @@ pub async fn get_versions_needed_by_tracked_configs(
     for cf in config.get_tracked_config_files().await?.values() {
         let mut ts = Toolset::from(cf.to_tool_request_set()?);
         ts.resolve_with_opts(config, &opts).await?;
-        for (_, tv) in ts.list_current_versions() {
+        for (_, tv) in ts
+            .list_current_versions()
+            .into_iter()
+            .filter(|(_, tv)| tv.version == tv.request.version())
+        {
             needed.insert((tv.ba().short.to_string(), tv.tv_pathname()));
         }
     }
@@ -635,10 +631,12 @@ mod tests {
 
         let mk_tv = |backend: Arc<dyn Backend>, version: &str| {
             let ba = backend.ba().clone();
-            let req = ToolRequest::System {
+            let req = ToolRequest {
                 backend: ba,
                 source: ToolSource::Argument,
                 options: Default::default(),
+                kind: ToolRequestKind::System,
+                reason: ToolRequestReason::Install,
             };
             ToolVersion::new(req, version.into())
         };

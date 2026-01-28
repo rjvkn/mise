@@ -8,29 +8,35 @@ Toolset {
             backend: BackendArg(node),
             versions: [],
             requests: [
-                Version {
+                ToolRequest {
                     backend: BackendArg(node),
-                    version: "16.0.1",
+                    source: MiseToml(
+                        "/tmp/.mise.toml",
+                    ),
                     options: ToolVersionOptions {
                         os: None,
                         install_env: {},
                         opts: {},
                     },
-                    source: MiseToml(
-                        "/tmp/.mise.toml",
-                    ),
+                    kind: Version {
+                        version: "16.0.1",
+                    },
+                    reason: Install,
                 },
-                Version {
+                ToolRequest {
                     backend: BackendArg(node),
-                    version: "18.0.1",
+                    source: MiseToml(
+                        "/tmp/.mise.toml",
+                    ),
                     options: ToolVersionOptions {
                         os: None,
                         install_env: {},
                         opts: {},
                     },
-                    source: MiseToml(
-                        "/tmp/.mise.toml",
-                    ),
+                    kind: Version {
+                        version: "18.0.1",
+                    },
+                    reason: Install,
                 },
             ],
             source: MiseToml(

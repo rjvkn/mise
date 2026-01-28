@@ -7,6 +7,8 @@ use crate::config::Config;
 use crate::config::Settings;
 use crate::duration::parse_into_timestamp;
 use crate::hooks::Hooks;
+use crate::toolset::tool_request::ToolRequestKind;
+use crate::toolset::tool_request::ToolRequestReason;
 use crate::toolset::{InstallOptions, ResolveOptions, ToolRequest, ToolSource, Toolset};
 use crate::{config, env, exit, hooks};
 use eyre::Result;
@@ -252,11 +254,14 @@ impl Install {
                         // in this case the user specified a tool which is not in config
                         // so we default to @latest with no options
                         None => {
-                            let tvr = ToolRequest::Version {
+                            let tvr = ToolRequest {
                                 backend: ta.ba.clone(),
-                                version: "latest".into(),
-                                options: ta.ba.opts(),
                                 source: ToolSource::Argument,
+                                options: ta.ba.opts(),
+                                kind: ToolRequestKind::Version {
+                                    version: "latest".into(),
+                                },
+                                reason: ToolRequestReason::Install,
                             };
                             requests.push(tvr);
                         }

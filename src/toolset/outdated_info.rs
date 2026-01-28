@@ -1,5 +1,6 @@
 use crate::semver::{chunkify_version, split_version_prefix};
 use crate::toolset;
+use crate::toolset::tool_request::{ToolRequestKind, ToolRequestReason};
 use crate::toolset::{ResolveOptions, ToolRequest, ToolSource, ToolVersion};
 use crate::{Result, config::Config};
 use serde_derive::Serialize;
@@ -30,23 +31,29 @@ pub struct OutdatedInfo {
 
 impl OutdatedInfo {
     pub fn new(config: &Arc<Config>, tv: ToolVersion, latest: String) -> Result<Self> {
-        let t = tv.backend()?;
-        let current = if t.is_version_installed(config, &tv, true) {
-            Some(tv.version.clone())
-        } else {
-            None
+        let current = tv
+            .backend()?
+            .is_version_installed(config, &tv, true)
+            .then(|| tv.version.clone());
+
+        let requested = tv.request.version();
+
+        let mut tool_request = tv.request.clone();
+        tool_request.reason = match current.as_deref() {
+            Some(c) if c == requested => ToolRequestReason::Update,
+            _ => ToolRequestReason::Upgrade,
         };
-        let oi = Self {
-            source: tv.request.source().clone(),
+
+        Ok(Self {
+            source: tool_request.source().clone(),
             name: tv.ba().short.to_string(),
             current,
-            requested: tv.request.version(),
-            tool_request: tv.request.clone(),
+            requested,
+            tool_request,
             tool_version: tv,
             bump: None,
             latest,
-        };
-        Ok(oi)
+        })
     }
 
     pub async fn resolve(
@@ -106,45 +113,29 @@ impl OutdatedInfo {
             let old = oi.tool_version.request.version();
             let old = old.strip_prefix(&prefix).unwrap_or_default();
             let new = oi.latest.strip_prefix(&prefix).unwrap_or_default();
+
             if let Some(bumped_version) = check_semver_bump(old, new)
                 && bumped_version != oi.tool_version.request.version()
             {
-                oi.bump = match oi.tool_request.clone() {
-                    ToolRequest::Version {
-                        version: _version,
-                        backend,
-                        options,
-                        source,
-                    } => {
-                        oi.tool_request = ToolRequest::Version {
-                            backend,
-                            options,
-                            source,
-                            version: format!("{prefix}{bumped_version}"),
-                        };
-                        Some(oi.tool_request.version())
+                match &mut oi.tool_request.kind {
+                    ToolRequestKind::Version { version } => {
+                        *version = format!("{prefix}{bumped_version}");
+                        oi.bump = Some(oi.tool_request.version());
                     }
-                    ToolRequest::Prefix {
-                        prefix: _prefix,
-                        backend,
-                        options,
-                        source,
-                    } => {
-                        oi.tool_request = ToolRequest::Prefix {
-                            backend,
-                            options,
-                            source,
-                            prefix: format!("{prefix}{bumped_version}"),
-                        };
-                        Some(oi.tool_request.version())
+
+                    ToolRequestKind::Prefix { prefix: p } => {
+                        *p = format!("{prefix}{bumped_version}");
+                        oi.bump = Some(oi.tool_request.version());
                     }
+
                     _ => {
                         warn!("upgrading non-version tool requests");
-                        None
+                        oi.bump = None;
                     }
                 }
             }
         }
+
         Ok(Some(oi))
     }
 

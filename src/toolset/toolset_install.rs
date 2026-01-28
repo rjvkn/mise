@@ -296,7 +296,7 @@ impl Toolset {
         let request_order: HashMap<String, usize> = versions
             .iter()
             .enumerate()
-            .map(|(i, tr)| (format!("{}@{}", tr.ba().full(), tr.version()), i))
+            .map(|(i, tr)| (tr.key(), i))
             .collect();
 
         // Build dependency graph
@@ -436,10 +436,7 @@ impl Toolset {
         }
 
         // Sort installed versions by original request order to preserve user's intended ordering
-        installed.sort_by_key(|tv| {
-            let key = format!("{}@{}", tv.ba().full(), tv.request.version());
-            request_order.get(&key).copied().unwrap_or(usize::MAX)
-        });
+        installed.sort_by_key(|tv| request_order.get(&tv.key()).copied().unwrap_or(usize::MAX));
 
         (installed, failed)
     }
@@ -458,6 +455,7 @@ impl Toolset {
 
         let ctx = InstallContext {
             config: config.clone(),
+            reason: opts.reason.clone(),
             ts: ts.clone(),
             pr: mpr.add_with_options(&tv.style(), opts.dry_run),
             force: opts.force,

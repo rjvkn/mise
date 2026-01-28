@@ -12,6 +12,7 @@ use crate::config::{Config, Settings};
 use crate::file;
 use crate::hash::hash_to_str;
 use crate::lockfile::{CondaPackageInfo, LockfileTool, PlatformInfo};
+use crate::toolset::tool_request::{ToolRequestKind, ToolRequestReason};
 use crate::toolset::{ToolRequest, ToolVersionOptions, tool_request};
 use console::style;
 use dashmap::DashMap;
@@ -61,21 +62,22 @@ impl ToolVersion {
             let tv = Self::new(request.clone(), request.version());
             return Ok(tv);
         }
-        let tv = match request.clone() {
-            ToolRequest::Version { version: v, .. } => {
-                Self::resolve_version(config, request, &v, opts).await?
+        let tv = match &request.kind {
+            ToolRequestKind::Version { version: v } => {
+                Self::resolve_version(config, request.clone(), v, opts).await?
             }
-            ToolRequest::Prefix { prefix, .. } => {
-                Self::resolve_prefix(config, request, &prefix, opts).await?
+            ToolRequestKind::Prefix { prefix } => {
+                Self::resolve_prefix(config, request.clone(), prefix, opts).await?
             }
-            ToolRequest::Sub {
-                sub, orig_version, ..
-            } => Self::resolve_sub(config, request, &sub, &orig_version, opts).await?,
+            ToolRequestKind::Sub { sub, orig_version } => {
+                Self::resolve_sub(config, request.clone(), sub, orig_version, opts).await?
+            }
             _ => {
                 let version = request.version();
                 Self::new(request, version)
             }
         };
+
         trace!("resolved: {tv}");
         Ok(tv)
     }
@@ -106,8 +108,8 @@ impl ToolVersion {
         if let Some(p) = CACHE.get(self) {
             return p.clone();
         }
-        let pathname = match &self.request {
-            ToolRequest::Path { path: p, .. } => p.to_string_lossy().to_string(),
+        let pathname = match &self.request.kind {
+            ToolRequestKind::Path { path: p, .. } => p.to_string_lossy().to_string(),
             _ => self.tv_pathname(),
         };
         let path = self.ba().installs_path.join(pathname);
@@ -134,6 +136,9 @@ impl ToolVersion {
     }
     pub fn download_path(&self) -> PathBuf {
         self.request.ba().downloads_path.join(self.tv_pathname())
+    }
+    pub fn key(&self) -> String {
+        self.request.key()
     }
     pub async fn latest_version(&self, config: &Arc<Config>) -> Result<String> {
         self.latest_version_with_opts(config, &ResolveOptions::default())
@@ -170,13 +175,13 @@ impl ToolVersion {
         )
     }
     pub fn tv_pathname(&self) -> String {
-        match &self.request {
-            ToolRequest::Version { .. } => self.version.to_string(),
-            ToolRequest::Prefix { .. } => self.version.to_string(),
-            ToolRequest::Sub { .. } => self.version.to_string(),
-            ToolRequest::Ref { ref_: r, .. } => format!("ref-{r}"),
-            ToolRequest::Path { path: p, .. } => format!("path-{}", hash_to_str(p)),
-            ToolRequest::System { .. } => {
+        match &self.request.kind {
+            ToolRequestKind::Version { .. } => self.version.to_string(),
+            ToolRequestKind::Prefix { .. } => self.version.to_string(),
+            ToolRequestKind::Sub { .. } => self.version.to_string(),
+            ToolRequestKind::Ref { ref_: r, .. } => format!("ref-{r}"),
+            ToolRequestKind::Path { path: p, .. } => format!("path-{}", hash_to_str(p)),
+            ToolRequestKind::System => {
                 // Only show deprecation warning if not from .tool-versions file
                 if !matches!(
                     self.request.source(),
@@ -355,24 +360,26 @@ impl ToolVersion {
         opts: ToolVersionOptions,
         tr: &ToolRequest,
     ) -> Self {
-        let request = ToolRequest::Ref {
+        let request = ToolRequest {
             backend: tr.ba().clone(),
-            ref_,
-            ref_type,
-            options: opts.clone(),
             source: tr.source().clone(),
+            options: opts.clone(),
+            kind: ToolRequestKind::Ref { ref_, ref_type },
+            reason: ToolRequestReason::ResolveRef,
         };
+
         let version = request.version();
         Self::new(request, version)
     }
 
     fn resolve_path(path: PathBuf, tr: &ToolRequest) -> Result<ToolVersion> {
         let path = fs::canonicalize(path)?;
-        let request = ToolRequest::Path {
+        let request = ToolRequest {
             backend: tr.ba().clone(),
-            path,
             source: tr.source().clone(),
             options: tr.options().clone(),
+            kind: ToolRequestKind::Path { path },
+            reason: ToolRequestReason::ResolvePath,
         };
         let version = request.version();
         Ok(Self::new(request, version))

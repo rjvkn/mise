@@ -17,7 +17,8 @@ use crate::plugins::Script::{Download, ExecEnv, Install, ParseIdiomaticFile};
 use crate::plugins::asdf_plugin::AsdfPlugin;
 use crate::plugins::mise_plugin_toml::MisePluginToml;
 use crate::plugins::{PluginType, Script, ScriptManager};
-use crate::toolset::{ToolRequest, ToolVersion, Toolset};
+use crate::toolset::tool_request::ToolRequestKind;
+use crate::toolset::{ToolVersion, Toolset};
 use crate::ui::progress_report::SingleReport;
 use crate::{backend::Backend, plugins::PluginEnum, timeout};
 use crate::{dirs, env, file};
@@ -109,7 +110,7 @@ impl AsdfBackend {
 
     async fn fetch_bin_paths(&self, config: &Arc<Config>, tv: &ToolVersion) -> Result<Vec<String>> {
         let list_bin_paths = self.plugin_path.join("bin/list-bin-paths");
-        let bin_paths = if matches!(tv.request, ToolRequest::System { .. }) {
+        let bin_paths = if matches!(tv.request.kind, ToolRequestKind::System) {
             Vec::new()
         } else if list_bin_paths.exists() {
             let sm = self.script_man_for_tv(config, tv).await?;
@@ -183,17 +184,17 @@ impl AsdfBackend {
             sm = sm.with_env("RTX_PROJECT_ROOT", project_root.clone());
             sm = sm.with_env("MISE_PROJECT_ROOT", project_root);
         }
-        let install_type = match &tv.request {
-            ToolRequest::Version { .. } | ToolRequest::Prefix { .. } => "version",
-            ToolRequest::Ref { .. } => "ref",
-            ToolRequest::Path { .. } => "path",
-            ToolRequest::Sub { .. } => "sub",
-            ToolRequest::System { .. } => {
+        let install_type = match &tv.request.kind {
+            ToolRequestKind::Version { .. } | ToolRequestKind::Prefix { .. } => "version",
+            ToolRequestKind::Ref { .. } => "ref",
+            ToolRequestKind::Path { .. } => "path",
+            ToolRequestKind::Sub { .. } => "sub",
+            ToolRequestKind::System => {
                 panic!("should not be called for system tool")
             }
         };
-        let install_version = match &tv.request {
-            ToolRequest::Ref { ref_: v, .. } => v, // should not have "ref:" prefix
+        let install_version = match &tv.request.kind {
+            ToolRequestKind::Ref { ref_: v, .. } => v, // should not have "ref:" prefix
             _ => &tv.version,
         };
         // add env vars from mise.toml files
@@ -402,7 +403,7 @@ impl Backend for AsdfBackend {
         tv: &ToolVersion,
     ) -> eyre::Result<EnvMap> {
         let total_start = std::time::Instant::now();
-        if matches!(tv.request, ToolRequest::System { .. }) {
+        if matches!(tv.request.kind, ToolRequestKind::System) {
             return Ok(BTreeMap::new());
         }
         if !self.plugin.script_man.script_exists(&ExecEnv) || *env::__MISE_SCRIPT {

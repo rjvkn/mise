@@ -180,9 +180,10 @@ impl Upgrade {
                     // Skip if current and latest version strings are identical
                     // This handles channels like "nightly", "stable", "beta" that update in-place
                     if &o.latest == current {
-                        return None;
+                        None
+                    } else {
+                        Some((o, current.clone()))
                     }
-                    Some((o, current.clone()))
                 })
             })
             .collect();
@@ -210,7 +211,6 @@ impl Upgrade {
 
         let opts = InstallOptions {
             reason: "upgrade".to_string(),
-            force: false,
             jobs: self.jobs,
             raw: self.raw,
             resolve_options: ResolveOptions {
@@ -241,7 +241,7 @@ impl Upgrade {
         for (o, cf) in config_file_updates {
             if successful_versions
                 .iter()
-                .any(|v| v.ba() == o.tool_version.ba())
+                .any(|v| v.ba() == o.tool_version.ba() && v.version == o.latest)
             {
                 if let Err(e) =
                     cf.replace_versions(o.tool_request.ba(), vec![o.tool_request.clone()])
@@ -273,7 +273,7 @@ impl Upgrade {
         for (o, tv) in to_remove {
             if successful_versions
                 .iter()
-                .any(|v| v.ba() == o.tool_version.ba())
+                .any(|v| v.ba() == o.tool_version.ba() && v.version == o.latest)
             {
                 // Check if this version is still needed by another tracked config
                 let version_key = (
@@ -324,7 +324,6 @@ impl Upgrade {
             .uninstall_version(config, tv, pr, self.dry_run)
             .await
             .wrap_err_with(|| format!("failed to uninstall {tv}"))?;
-        pr.finish();
         Ok(())
     }
 

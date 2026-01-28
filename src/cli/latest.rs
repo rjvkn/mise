@@ -2,7 +2,7 @@ use color_eyre::eyre::{Result, bail};
 
 use crate::cli::args::ToolArg;
 use crate::config::Config;
-use crate::toolset::ToolRequest;
+use crate::toolset::tool_request::ToolRequestKind;
 use crate::ui::multi_progress_report::MultiProgressReport;
 
 /// Gets the latest available version for a plugin
@@ -29,10 +29,13 @@ pub struct Latest {
 impl Latest {
     pub async fn run(self) -> Result<()> {
         let config = Config::get().await?;
-        let mut prefix = match self.tool.tvr {
+
+        let mut prefix = match &self.tool.tvr {
             None => self.asdf_version,
-            Some(ToolRequest::Version { version, .. }) => Some(version),
-            _ => bail!("invalid version: {}", self.tool.style()),
+            Some(tvr) => match &tvr.kind {
+                ToolRequestKind::Version { version } => Some(version.clone()),
+                _ => bail!("invalid version: {}", self.tool.style()),
+            },
         };
 
         let backend = self.tool.ba.backend()?;

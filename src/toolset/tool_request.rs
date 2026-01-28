@@ -1,9 +1,7 @@
 use std::collections::BTreeMap;
+use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
-use std::{
-    fmt::{Display, Formatter},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use eyre::{Result, bail};
 use versions::{Chunk, Version};
@@ -19,243 +17,162 @@ use crate::{backend, lockfile};
 use crate::{backend::ABackend, config::Config};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub enum ToolRequest {
-    Version {
-        backend: Arc<BackendArg>,
-        version: String,
-        options: ToolVersionOptions,
-        source: ToolSource,
-    },
-    Prefix {
-        backend: Arc<BackendArg>,
-        prefix: String,
-        options: ToolVersionOptions,
-        source: ToolSource,
-    },
-    Ref {
-        backend: Arc<BackendArg>,
-        ref_: String,
-        ref_type: String,
-        options: ToolVersionOptions,
-        source: ToolSource,
-    },
-    Sub {
-        backend: Arc<BackendArg>,
-        sub: String,
-        orig_version: String,
-        options: ToolVersionOptions,
-        source: ToolSource,
-    },
-    Path {
-        backend: Arc<BackendArg>,
-        path: PathBuf,
-        options: ToolVersionOptions,
-        source: ToolSource,
-    },
-    System {
-        backend: Arc<BackendArg>,
-        source: ToolSource,
-        options: ToolVersionOptions,
-    },
+pub struct ToolRequest {
+    pub backend: Arc<BackendArg>,
+    pub source: ToolSource,
+    pub options: ToolVersionOptions,
+    pub kind: ToolRequestKind,
+    pub reason: ToolRequestReason,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum ToolRequestKind {
+    Version { version: String },
+    Prefix { prefix: String },
+    Ref { ref_: String, ref_type: String },
+    Sub { sub: String, orig_version: String },
+    Path { path: PathBuf },
+    System,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum ToolRequestReason {
+    Install,
+    Update,
+    Upgrade,
+    ListCurrentVersions,
+    ResolveRef,
+    ResolvePath,
 }
 
 impl ToolRequest {
-    pub fn new(backend: Arc<BackendArg>, s: &str, source: ToolSource) -> eyre::Result<Self> {
-        let s = match s.split_once('-') {
-            Some((ref_type @ ("ref" | "tag" | "branch" | "rev"), r)) => format!("{ref_type}:{r}"),
+    pub fn new(backend: Arc<BackendArg>, s: &str, source: ToolSource) -> Result<Self> {
+        let normalized = match s.split_once('-') {
+            Some((ref_type @ ("ref" | "tag" | "branch" | "rev"), r)) => {
+                format!("{ref_type}:{r}")
+            }
             _ => s.to_string(),
         };
-        Ok(match s.split_once(':') {
-            Some((ref_type @ ("ref" | "tag" | "branch" | "rev"), r)) => Self::Ref {
+
+        let options = backend.opts();
+
+        let kind = match normalized.split_once(':') {
+            Some((ref_type @ ("ref" | "tag" | "branch" | "rev"), r)) => ToolRequestKind::Ref {
                 ref_: r.to_string(),
                 ref_type: ref_type.to_string(),
-                options: backend.opts(),
-                backend,
-                source,
             },
-            Some(("prefix", p)) => Self::Prefix {
+            Some(("prefix", p)) => ToolRequestKind::Prefix {
                 prefix: p.to_string(),
-                options: backend.opts(),
-                backend,
-                source,
             },
-            Some(("path", p)) => Self::Path {
+            Some(("path", p)) => ToolRequestKind::Path {
                 path: PathBuf::from(p),
-                options: backend.opts(),
-                backend,
-                source,
             },
-            Some((p, v)) if p.starts_with("sub-") => Self::Sub {
+            Some((p, v)) if p.starts_with("sub-") => ToolRequestKind::Sub {
                 sub: p.split_once('-').unwrap().1.to_string(),
-                options: backend.opts(),
                 orig_version: v.to_string(),
-                backend,
-                source,
             },
-            None => {
-                if s == "system" {
-                    Self::System {
-                        options: backend.opts(),
-                        backend,
-                        source,
-                    }
-                } else {
-                    Self::Version {
-                        version: s,
-                        options: backend.opts(),
-                        backend,
-                        source,
-                    }
-                }
-            }
-            _ => bail!("invalid tool version request: {s}"),
+            None if normalized == "system" => ToolRequestKind::System,
+            None => ToolRequestKind::Version {
+                version: normalized,
+            },
+            _ => bail!("invalid tool version request: {normalized}"),
+        };
+
+        Ok(Self {
+            backend,
+            source,
+            options,
+            kind,
+            reason: ToolRequestReason::Install,
         })
     }
+
     pub fn new_opts(
         backend: Arc<BackendArg>,
         s: &str,
         options: ToolVersionOptions,
         source: ToolSource,
-    ) -> eyre::Result<Self> {
-        let mut tvr = Self::new(backend, s, source)?;
-        match &mut tvr {
-            Self::Version { options: o, .. }
-            | Self::Prefix { options: o, .. }
-            | Self::Ref { options: o, .. } => *o = options,
-            _ => Default::default(),
-        }
-        Ok(tvr)
+    ) -> Result<Self> {
+        let mut r = Self::new(backend, s, source)?;
+        r.options = options;
+        Ok(r)
     }
-    pub fn set_source(&mut self, source: ToolSource) -> Self {
-        match self {
-            Self::Version { source: s, .. }
-            | Self::Prefix { source: s, .. }
-            | Self::Ref { source: s, .. }
-            | Self::Path { source: s, .. }
-            | Self::Sub { source: s, .. }
-            | Self::System { source: s, .. } => *s = source,
-        }
-        self.clone()
-    }
-    pub fn ba(&self) -> &Arc<BackendArg> {
-        match self {
-            Self::Version { backend, .. }
-            | Self::Prefix { backend, .. }
-            | Self::Ref { backend, .. }
-            | Self::Path { backend, .. }
-            | Self::Sub { backend, .. }
-            | Self::System { backend, .. } => backend,
-        }
-    }
+
     pub fn backend(&self) -> Result<ABackend> {
-        self.ba().backend()
+        self.backend.backend()
     }
+
+    pub fn ba(&self) -> &Arc<BackendArg> {
+        &self.backend
+    }
+
     pub fn source(&self) -> &ToolSource {
-        match self {
-            Self::Version { source, .. }
-            | Self::Prefix { source, .. }
-            | Self::Ref { source, .. }
-            | Self::Path { source, .. }
-            | Self::Sub { source, .. }
-            | Self::System { source, .. } => source,
-        }
+        &self.source
     }
-    pub fn os(&self) -> &Option<Vec<String>> {
-        match self {
-            Self::Version { options, .. }
-            | Self::Prefix { options, .. }
-            | Self::Ref { options, .. }
-            | Self::Path { options, .. }
-            | Self::Sub { options, .. }
-            | Self::System { options, .. } => &options.os,
-        }
-    }
-    pub fn set_options(&mut self, options: ToolVersionOptions) -> &mut Self {
-        match self {
-            Self::Version { options: o, .. }
-            | Self::Prefix { options: o, .. }
-            | Self::Ref { options: o, .. }
-            | Self::Sub { options: o, .. }
-            | Self::Path { options: o, .. }
-            | Self::System { options: o, .. } => *o = options,
-        }
+
+    pub fn set_source(&mut self, source: ToolSource) -> &mut Self {
+        self.source = source;
         self
-    }
-    pub fn version(&self) -> String {
-        match self {
-            Self::Version { version: v, .. } => v.clone(),
-            Self::Prefix { prefix: p, .. } => format!("prefix:{p}"),
-            Self::Ref {
-                ref_: r, ref_type, ..
-            } => format!("{ref_type}:{r}"),
-            Self::Path { path: p, .. } => format!("path:{}", p.display()),
-            Self::Sub {
-                sub, orig_version, ..
-            } => format!("sub-{sub}:{orig_version}"),
-            Self::System { .. } => "system".to_string(),
-        }
     }
 
     pub fn options(&self) -> ToolVersionOptions {
-        match self {
-            Self::Version { options: o, .. }
-            | Self::Prefix { options: o, .. }
-            | Self::Ref { options: o, .. }
-            | Self::Sub { options: o, .. }
-            | Self::Path { options: o, .. }
-            | Self::System { options: o, .. } => o.clone(),
+        self.options.clone()
+    }
+
+    pub fn set_options(&mut self, options: ToolVersionOptions) -> &mut Self {
+        self.options = options;
+        self
+    }
+
+    pub fn os(&self) -> &Option<Vec<String>> {
+        &self.options.os
+    }
+
+    pub fn version(&self) -> String {
+        match &self.kind {
+            ToolRequestKind::Version { version } => version.clone(),
+            ToolRequestKind::Prefix { prefix } => format!("prefix:{prefix}"),
+            ToolRequestKind::Ref { ref_, ref_type } => format!("{ref_type}:{ref_}"),
+            ToolRequestKind::Path { path } => format!("path:{}", path.display()),
+            ToolRequestKind::Sub { sub, orig_version } => {
+                format!("sub-{sub}:{orig_version}")
+            }
+            ToolRequestKind::System => "system".into(),
         }
     }
 
-    pub async fn is_installed(&self, config: &Arc<Config>) -> bool {
-        if let Some(backend) = backend::get(self.ba()) {
-            match self.resolve(config, &Default::default()).await {
-                Ok(tv) => backend.is_version_installed(config, &tv, false),
-                Err(e) => {
-                    debug!("ToolRequest.is_installed: {e:#}");
-                    false
-                }
-            }
-        } else {
-            false
-        }
+    pub fn key(&self) -> String {
+        format!("{}@{}", self.backend.full(), self.version())
     }
 
     pub fn install_path(&self, config: &Config) -> Option<PathBuf> {
-        match self {
-            Self::Version {
-                backend, version, ..
-            } => Some(backend.installs_path.join(version)),
-            Self::Ref {
-                backend,
-                ref_,
-                ref_type,
-                ..
-            } => Some(backend.installs_path.join(format!("{ref_type}-{ref_}"))),
-            Self::Sub {
-                backend,
-                sub,
-                orig_version,
-                ..
-            } => self
+        let backend = &self.backend;
+
+        match &self.kind {
+            ToolRequestKind::Version { version } => Some(backend.installs_path.join(version)),
+
+            ToolRequestKind::Ref { ref_, ref_type } => {
+                Some(backend.installs_path.join(format!("{ref_type}-{ref_}")))
+            }
+
+            ToolRequestKind::Sub { sub, orig_version } => self
                 .local_resolve(config, orig_version)
-                .inspect_err(|e| warn!("ToolRequest.local_resolve: {e:#}"))
-                .unwrap_or_default()
-                .map(|v| backend.installs_path.join(version_sub(&v, sub.as_str()))),
-            Self::Prefix {
-                backend, prefix, ..
-            } => match file::ls(&backend.installs_path) {
-                Ok(installs) => installs
-                    .iter()
-                    .find(|p| {
+                .ok()
+                .flatten()
+                .map(|v| backend.installs_path.join(version_sub(&v, sub))),
+
+            ToolRequestKind::Prefix { prefix } => {
+                file::ls(&backend.installs_path).ok().and_then(|installs| {
+                    installs.into_iter().find(|p| {
                         !is_runtime_symlink(p)
                             && p.file_name().unwrap().to_string_lossy().starts_with(prefix)
                     })
-                    .cloned(),
-                Err(_) => None,
-            },
-            Self::Path { path, .. } => Some(path.clone()),
-            Self::System { .. } => None,
+                })
+            }
+
+            ToolRequestKind::Path { path } => Some(path.clone()),
+
+            ToolRequestKind::System => None,
         }
     }
 
@@ -290,7 +207,7 @@ impl ToolRequest {
         )
     }
 
-    pub fn local_resolve(&self, config: &Config, v: &str) -> eyre::Result<Option<String>> {
+    pub fn local_resolve(&self, config: &Config, v: &str) -> Result<Option<String>> {
         if let Some(lt) = self.lockfile_resolve(config)? {
             return Ok(Some(lt.version));
         }
@@ -314,6 +231,17 @@ impl ToolRequest {
         ToolVersion::resolve(config, self.clone(), opts).await
     }
 
+    pub async fn is_installed(&self, config: &Arc<Config>) -> bool {
+        if let Some(backend) = backend::get(self.ba()) {
+            match self.resolve(config, &Default::default()).await {
+                Ok(tv) => backend.is_version_installed(config, &tv, false),
+                Err(_) => false,
+            }
+        } else {
+            false
+        }
+    }
+
     pub fn is_os_supported(&self) -> bool {
         if let Some(os) = self.os()
             && !os.contains(&crate::cli::version::OS)
@@ -324,22 +252,45 @@ impl ToolRequest {
     }
 }
 
+impl Display for ToolRequest {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}@{}", self.backend, self.version())
+    }
+}
+
+impl ToolRequestReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ToolRequestReason::Install => "install",
+            ToolRequestReason::Update => "update",
+            ToolRequestReason::Upgrade => "upgrade",
+            ToolRequestReason::ListCurrentVersions => "list_current_versions",
+            ToolRequestReason::ResolveRef => "resolve_ref",
+            ToolRequestReason::ResolvePath => "resolve_path",
+        }
+    }
+}
+
+impl fmt::Display for ToolRequestReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// subtracts sub from orig and removes suffix
-/// e.g. version_sub("18.2.3", "2") -> "16"
-/// e.g. version_sub("18.2.3", "0.1") -> "18.1"
-/// e.g. version_sub("2.79.0", "0.0.1") -> "2.78" (underflow, returns prefix)
 pub fn version_sub(orig: &str, sub: &str) -> String {
     let mut orig = Version::new(orig).unwrap();
     let sub = Version::new(sub).unwrap();
+
     while orig.chunks.0.len() > sub.chunks.0.len() {
         orig.chunks.0.pop();
     }
+
     for i in 0..orig.chunks.0.len() {
         let m = sub.nth(i).unwrap();
         let orig_val = orig.chunks.0[i].single_digit().unwrap();
 
         if orig_val < m {
-            // Handle underflow with borrowing from higher digits
             for j in (0..i).rev() {
                 let prev_val = orig.chunks.0[j].single_digit().unwrap();
                 if prev_val > 0 {
@@ -353,13 +304,8 @@ pub fn version_sub(orig: &str, sub: &str) -> String {
 
         orig.chunks.0[i] = Chunk::Numeric(orig_val - m);
     }
-    orig.to_string()
-}
 
-impl Display for ToolRequest {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}@{}", &self.ba(), self.version())
-    }
+    orig.to_string()
 }
 
 #[cfg(test)]

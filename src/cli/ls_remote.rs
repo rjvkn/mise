@@ -5,7 +5,8 @@ use serde::Serialize;
 
 use crate::backend::Backend;
 use crate::cli::args::ToolArg;
-use crate::toolset::{ToolRequest, tool_request};
+use crate::toolset::tool_request;
+use crate::toolset::tool_request::ToolRequestKind;
 use crate::ui::multi_progress_report::MultiProgressReport;
 use crate::{backend, config::Config};
 
@@ -56,14 +57,18 @@ impl LsRemote {
     async fn run_single(self, config: &Arc<Config>, plugin: Arc<dyn Backend>) -> Result<()> {
         let prefix = match &self.plugin {
             Some(tool_arg) => match &tool_arg.tvr {
-                Some(ToolRequest::Version { version: v, .. }) => Some(v.clone()),
-                Some(ToolRequest::Sub {
-                    sub, orig_version, ..
-                }) => Some(tool_request::version_sub(orig_version, sub)),
-                _ => self.prefix.clone(),
+                Some(tvr) => match &tvr.kind {
+                    ToolRequestKind::Version { version: v } => Some(v.clone()),
+                    ToolRequestKind::Sub { sub, orig_version } => {
+                        Some(tool_request::version_sub(orig_version, sub))
+                    }
+                    _ => self.prefix.clone(),
+                },
+                None => self.prefix.clone(),
             },
-            _ => self.prefix.clone(),
+            None => self.prefix.clone(),
         };
+
         let matches_prefix = |v: &str| prefix.as_ref().is_none_or(|p| v.starts_with(p));
 
         let versions: Vec<_> = plugin

@@ -30,6 +30,10 @@ impl RustPlugin {
         }
     }
 
+    fn is_channel(&self, tv: &ToolVersion) -> bool {
+        matches!(tv.version.as_str(), "nightly" | "stable" | "beta")
+    }
+
     async fn setup_rustup(&self, ctx: &InstallContext, tv: &ToolVersion) -> Result<()> {
         let settings = Settings::get();
         if rustup_home().join("settings.toml").exists() && cargo_bin().exists() {
@@ -131,19 +135,35 @@ impl Backend for RustPlugin {
 
         let (profile, components, targets) = get_args(&tv);
 
-        let mut cmd = CmdLineRunner::new(RUSTUP_BIN)
-            .with_pr(ctx.pr.as_ref())
-            .arg("toolchain")
-            .arg("install")
-            .arg(&tv.version)
-            .opt_args("--component", components)
-            .opt_args("--target", targets)
-            .prepend_path(self.list_bin_paths(&ctx.config, &tv).await?)?
-            .envs(self.exec_env(&ctx.config, ts, &tv).await?);
-        if let Some(profile) = profile.as_ref() {
-            cmd = cmd.arg("--profile").arg(profile);
+        let mut cmd = CmdLineRunner::new(RUSTUP_BIN).with_pr(ctx.pr.as_ref());
+
+        if self.is_channel(&tv) && self.is_version_installed(&ctx.config, &tv, true) {
+            // For channels (nightly, stable, beta), use update
+            cmd = cmd.arg("update").arg(&tv.version);
+        } else {
+            // For specific versions, use toolchain install
+            cmd = cmd.arg("toolchain").arg("install").arg(&tv.version);
+
+            if let Some(profile) = profile.as_ref() {
+                cmd = cmd.arg("--profile").arg(profile);
+            }
+
+            if let Some(components) = components.as_ref() {
+                for c in components {
+                    cmd = cmd.arg("--component").arg(c);
+                }
+            }
+
+            if let Some(targets) = targets.as_ref() {
+                for t in targets {
+                    cmd = cmd.arg("--target").arg(t);
+                }
+            }
         }
-        cmd.execute()?;
+
+        cmd.prepend_path(self.list_bin_paths(&ctx.config, &tv).await?)?
+            .envs(self.exec_env(&ctx.config, ts, &tv).await?)
+            .execute()?;
 
         file::remove_all(tv.install_path())?;
         file::make_symlink(&cargo_home().join("bin"), &tv.install_path())?;
@@ -209,7 +229,7 @@ impl Backend for RustPlugin {
         opts: &ResolveOptions,
     ) -> Result<Option<OutdatedInfo>> {
         let v_re = regex!(r#"Update available : (.*) -> (.*)"#);
-        if regex!(r"(\d+)\.(\d+)\.(\d+)").is_match(&tv.version) {
+        if !self.is_channel(tv) {
             let oi = OutdatedInfo::resolve(config, tv.clone(), bump, opts).await?;
             Ok(oi)
         } else {

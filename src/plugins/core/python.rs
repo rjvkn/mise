@@ -11,6 +11,7 @@ use crate::git::{CloneOptions, Git};
 use crate::http::{HTTP, HTTP_FETCH};
 use crate::install_context::InstallContext;
 use crate::lockfile::PlatformInfo;
+use crate::toolset::tool_request::ToolRequestKind;
 use crate::toolset::{ToolRequest, ToolVersion, Toolset};
 use crate::ui::progress_report::SingleReport;
 use crate::{Result, lock_file::LockFile};
@@ -327,7 +328,7 @@ impl PythonPlugin {
 
     async fn install_compiled(&self, ctx: &InstallContext, tv: &ToolVersion) -> eyre::Result<()> {
         self.install_or_update_python_build(Some(ctx))?;
-        if matches!(&tv.request, ToolRequest::Ref { .. }) {
+        if matches!(tv.request.kind, ToolRequestKind::Ref { .. }) {
             return Err(eyre!("Ref versions not supported for python"));
         }
         ctx.pr.set_message("python-build".into());

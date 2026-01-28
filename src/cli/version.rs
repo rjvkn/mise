@@ -100,7 +100,7 @@ fn show_version() -> std::io::Result<()> {
     if console::user_attended() {
         let banner = style::nred(
             r#"
-              _                                        __              
+              _                                        __
    ____ ___  (_)_______        ___  ____        ____  / /___ _________
   / __ `__ \/ / ___/ _ \______/ _ \/ __ \______/ __ \/ / __ `/ ___/ _ \
  / / / / / / (__  )  __/_____/  __/ / / /_____/ /_/ / / /_/ / /__/  __/
@@ -108,8 +108,7 @@ fn show_version() -> std::io::Result<()> {
                                             /_/"#
                 .trim_start_matches("\n"),
         );
-        let jdx = style::nbright("by @jdx");
-        miseprintln!("{banner}                 {jdx}");
+        miseprintln!("{banner}");
     }
     miseprintln!("{}", *VERSION);
     Ok(())

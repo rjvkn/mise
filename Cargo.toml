@@ -190,6 +190,7 @@ xx = { version = "2.5", default-features = false, features = ["glob"] }
 xz2 = "0.1"
 zip = { version = "3", default-features = false, features = ["deflate"] }
 zstd = "0.13"
+semver = "1.0.27"
 
 [target.'cfg(unix)'.dependencies]
 exec = "0.3"
