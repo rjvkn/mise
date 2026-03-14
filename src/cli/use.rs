@@ -9,7 +9,6 @@ use itertools::Itertools;
 use jiff::Timestamp;
 use path_absolutize::Absolutize;
 
-use crate::cli::args::{BackendArg, ToolArg};
 use crate::config::config_file::ConfigFile;
 use crate::config::{Config, ConfigPathOptions, Settings, config_file, resolve_target_config_path};
 use crate::duration::parse_into_timestamp;
@@ -20,6 +19,10 @@ use crate::toolset::{
     ToolsetBuilder,
 };
 use crate::ui::ctrlc;
+use crate::{
+    cli::args::{BackendArg, ToolArg},
+    toolset::tool_request::ToolRequestKind,
+};
 use crate::{config, env, exit, file};
 
 /// Installs a tool and adds the version to mise.toml.
@@ -189,24 +192,18 @@ impl Use {
                 .into_iter()
                 .map(|tv| {
                     let mut request = tv.request.clone();
-                    if pin
-                        && let ToolRequest::Version {
-                            version: _version,
-                            source,
-                            options,
-                            backend,
-                        } = request
-                    {
-                        request = ToolRequest::Version {
+
+                    if pin && let ToolRequestKind::Version { .. } = &request.kind {
+                        // Replace the version string but keep backend, source, options
+                        request.kind = ToolRequestKind::Version {
                             version: tv.version.clone(),
-                            source,
-                            options,
-                            backend,
                         };
                     }
+
                     request
                 })
                 .collect();
+
             cf.replace_versions(ba, versions)?;
         }
 
@@ -375,7 +372,7 @@ impl Use {
 
 static AFTER_LONG_HELP: &str = color_print::cstr!(
     r#"<bold><underline>Examples:</underline></bold>
-    
+
     # run with no arguments to use the interactive selector
     $ <bold>mise use</bold>
 

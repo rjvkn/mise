@@ -23,6 +23,7 @@ use crate::plugins::{PluginType, VERSION_REGEX};
 use crate::registry::{REGISTRY, full_to_url, normalize_remote, tool_enabled};
 use crate::runtime_symlinks::is_runtime_symlink;
 use crate::toolset::outdated_info::OutdatedInfo;
+use crate::toolset::tool_request::{ToolRequestKind, ToolRequestReason};
 use crate::toolset::{
     ResolveOptions, ToolRequest, ToolVersion, Toolset, install_state, is_outdated_version,
 };
@@ -594,7 +595,7 @@ pub trait Backend: Debug + Send + Sync {
     }
     fn is_version_installed(
         &self,
-        config: &Arc<Config>,
+        _config: &Arc<Config>,
         tv: &ToolVersion,
         check_symlink: bool,
     ) -> bool {
@@ -623,27 +624,9 @@ pub trait Backend: Debug + Send + Sync {
             }
             installed
         };
-        match tv.request {
-            ToolRequest::System { .. } => true,
-            _ => {
-                if let Some(install_path) = tv.request.install_path(config)
-                    && check_path(&install_path, true)
-                {
-                    // For Prefix requests, install_path finds any installed dir
-                    // matching the prefix (e.g., "1.0.0" for prefix "1"), but if
-                    // the ToolVersion resolved to a different version (e.g., "1.1.0"),
-                    // we must not treat it as installed.
-                    if let ToolRequest::Prefix { .. } = &tv.request
-                        && install_path
-                            .file_name()
-                            .is_some_and(|f| f.to_string_lossy() != tv.version)
-                    {
-                        return check_path(&tv.install_path(), check_symlink);
-                    }
-                    return true;
-                }
-                check_path(&tv.install_path(), check_symlink)
-            }
+        match tv.request.kind {
+            ToolRequestKind::System => true,
+            _ => check_path(&tv.install_path(), check_symlink),
         }
     }
     async fn is_version_outdated(&self, config: &Arc<Config>, tv: &ToolVersion) -> bool {
@@ -1038,32 +1021,27 @@ pub trait Backend: Debug + Send + Sync {
 
         let will_uninstall = ctx.force && self.is_version_installed(&ctx.config, &tv, true);
 
-        // Query backend for operation count and set up progress tracking
-        let install_ops = self.install_operation_count(&tv, &ctx).await;
-        let total_ops = if will_uninstall {
-            install_ops + 1
-        } else {
-            install_ops
-        };
+        let total_ops = self.install_operation_count(&tv, &ctx).await + usize::from(will_uninstall);
         ctx.pr.start_operations(total_ops);
 
         if will_uninstall {
             self.uninstall_version(&ctx.config, &tv, ctx.pr.as_ref(), false)
                 .await?;
             ctx.pr.next_operation();
-        } else if self.is_version_installed(&ctx.config, &tv, true) {
-            return Ok(tv);
         }
 
         // Track the installation asynchronously (fire-and-forget)
         // Do this before install so the request has time to complete during installation
         versions_host::track_install(tv.short(), &tv.ba().full(), &tv.version);
 
-        ctx.pr.set_message("install".into());
-        let _lock = lock_file::get(&tv.install_path(), ctx.force)?;
+        ctx.pr.set_message(tv.request.reason.to_string());
+        let _lock = lock_file::get(&tv.install_path())?;
 
         // Double-checked (locking) that it wasn't installed while we were waiting for the lock
-        if self.is_version_installed(&ctx.config, &tv, true) && !ctx.force {
+        if tv.request.reason != ToolRequestReason::Update
+            && !ctx.force
+            && self.is_version_installed(&ctx.config, &tv, true)
+        {
             return Ok(tv);
         }
 
@@ -1208,8 +1186,8 @@ pub trait Backend: Debug + Send + Sync {
         _config: &Arc<Config>,
         tv: &ToolVersion,
     ) -> Result<Vec<PathBuf>> {
-        match tv.request {
-            ToolRequest::System { .. } => Ok(vec![]),
+        match tv.request.kind {
+            ToolRequestKind::System => Ok(vec![]),
             _ => Ok(vec![tv.install_path().join("bin")]),
         }
     }
@@ -1550,12 +1528,15 @@ pub trait Backend: Debug + Send + Sync {
 
     async fn outdated_info(
         &self,
-        _config: &Arc<Config>,
-        _tv: &ToolVersion,
-        _bump: bool,
-        _opts: &ResolveOptions,
+        config: &Arc<Config>,
+        tv: &ToolVersion,
+        bump: bool,
+        opts: &ResolveOptions,
     ) -> Result<Option<OutdatedInfo>> {
-        Ok(None)
+        Ok(OutdatedInfo::resolve(config, tv.clone(), bump, opts)
+            .await
+            .ok()
+            .flatten())
     }
 
     // ========== Lockfile Metadata Fetching Methods ==========
